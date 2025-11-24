@@ -18,7 +18,7 @@ jobs:
     steps:
       # Repository Setup
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       # Python Environment Configuration
       - name: Configure Python environment
