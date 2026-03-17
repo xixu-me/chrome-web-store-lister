@@ -1,0 +1,13 @@
+-r requirements.txt
+
+# Development-only auditing tools.
+bandit[toml]>=1.9.4
+safety>=3.7.0
+
+# Keep these transitive packages explicitly on fixed versions so Dependabot can
+# reason about secure minimums without a lockfile.
+authlib>=1.6.9
+cryptography>=46.0.5
+filelock>=3.20.3
+marshmallow>=4.1.2
+nltk>=3.9.3

@@ -1,9 +1,10 @@
 version: 2
 updates:
   # Python Dependencies Management
-  # Monitors and updates Python packages in requirements.txt
+  # Monitors and updates Python requirement files in the repository root
   - package-ecosystem: "pip"
     directory: "/"
+    versioning-strategy: "increase"
     schedule:
       interval: "weekly"
       day: "monday"
