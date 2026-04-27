@@ -6,7 +6,7 @@ safety>=3.7.0
 
 # Keep these transitive packages explicitly on fixed versions so Dependabot can
 # reason about secure minimums without a lockfile.
-authlib>=1.6.9
+authlib>=1.7.0
 cryptography>=46.0.5
 filelock>=3.29.0
 marshmallow>=4.1.2
