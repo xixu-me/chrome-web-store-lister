@@ -1,4 +1,4 @@
-requests>=2.31.0
+requests>=2.33.1
 urllib3>=2.6.3
 beautifulsoup4>=4.14.3
 validators>=0.22.0
