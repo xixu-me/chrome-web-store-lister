@@ -2,7 +2,7 @@
 
 # Development-only auditing tools.
 bandit[toml]>=1.9.4
-safety>=3.7.0
+safety>=3.8.1
 
 # Keep these transitive packages explicitly on fixed versions so Dependabot can
 # reason about secure minimums without a lockfile.
