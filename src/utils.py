@@ -46,7 +46,9 @@ def sanitize_filename(filename: str) -> str:
     return filename
 
 
-def get_chrome_store_item_name(url: str) -> Optional[str]:
+def get_chrome_store_item_name(
+    url: str, session: Optional[requests.Session] = None, timeout: int = 10
+) -> Optional[str]:
     """
     Fetch the actual item name from Chrome Web Store page title.
 
@@ -55,19 +57,31 @@ def get_chrome_store_item_name(url: str) -> Optional[str]:
 
     Args:
         url: The Chrome Web Store item URL.
+        session: Optional HTTP session used to reuse pooled connections.
+        timeout: HTTP request timeout in seconds.
 
     Returns:
         The clean item name as a string, or None if the title
         cannot be retrieved or processed.
     """
+    http = session or requests
     try:
         # Set a timeout to prevent the request from hanging indefinitely
-        response = requests.get(url, timeout=10)
+        response = http.get(url, timeout=timeout)
         # Raise an HTTPError for bad responses (4xx or 5xx)
         response.raise_for_status()
 
-        # Parse the HTML content
-        soup = BeautifulSoup(response.content, "html.parser")
+        # Parse only the title element instead of the whole (large) page
+        content = response.content
+        title_start = content.find(b"<title")
+        title_end = content.find(b"</title>", title_start)
+        if title_start == -1 or title_end == -1:
+            return None  # No title tag was found
+        soup = BeautifulSoup(
+            content[title_start : title_end + len(b"</title>")],
+            "html.parser",
+            from_encoding="utf-8",
+        )
 
         # Find the title tag and return its string content
         if soup.title and soup.title.string:
@@ -192,7 +206,9 @@ def sanitize_item_data(item_data: dict) -> Optional[dict]:
     return sanitized
 
 
-def extract_item_data(url: str) -> Optional[dict[str, str]]:
+def extract_item_data(
+    url: str, session: Optional[requests.Session] = None, timeout: int = 10
+) -> Optional[dict[str, str]]:
     """
     Extract Chrome Web Store item data from URL.
 
@@ -201,6 +217,8 @@ def extract_item_data(url: str) -> Optional[dict[str, str]]:
 
     Args:
         url: Chrome Web Store item detail URL.
+        session: Optional HTTP session used to fetch the item page.
+        timeout: HTTP request timeout in seconds.
 
     Returns:
         Optional[dict[str, str]]: Dictionary containing item data
@@ -219,7 +237,7 @@ def extract_item_data(url: str) -> Optional[dict[str, str]]:
 
     try:
         # Get the item name from the page title
-        item_name = get_chrome_store_item_name(url)
+        item_name = get_chrome_store_item_name(url, session, timeout)
 
         # Generate Chrome item download URL
         crx_download_url = f"https://clients2.google.com/service/update2/crx?response=redirect&prodversion=138&acceptformat=crx2,crx3&x=id%3D{item_id}%26uc"

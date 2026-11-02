@@ -28,6 +28,7 @@ def main() -> None:
             request_timeout=args.timeout,
             delay=args.delay,
             max_workers=args.max_workers,
+            item_workers=args.item_workers,
             retry_attempts=args.retry_attempts,
             show_progress=not args.no_progress,
         )
