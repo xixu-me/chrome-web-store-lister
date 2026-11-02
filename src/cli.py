@@ -11,6 +11,7 @@ from pathlib import Path
 
 from src.config import (
     DEFAULT_DELAY_BETWEEN_REQUESTS,
+    DEFAULT_ITEM_WORKERS,
     DEFAULT_MAX_WORKERS,
     DEFAULT_OUTPUT_FILE,
     DEFAULT_REQUEST_TIMEOUT,
@@ -153,6 +154,13 @@ def parse_arguments() -> argparse.Namespace:
     )
 
     parser.add_argument(
+        "--item-workers",
+        type=validate_positive_integer,
+        default=int(os.getenv("ITEM_WORKERS", DEFAULT_ITEM_WORKERS)),
+        help="Maximum number of concurrent item page requests",
+    )
+
+    parser.add_argument(
         "--retry-attempts",
         type=validate_positive_integer,
         default=int(os.getenv("RETRY_ATTEMPTS", DEFAULT_RETRY_ATTEMPTS)),
@@ -191,6 +199,7 @@ def main() -> None:
         request_timeout=args.timeout,
         delay=args.delay,
         max_workers=args.max_workers,
+        item_workers=args.item_workers,
         retry_attempts=args.retry_attempts,
         show_progress=not args.no_progress,
     )

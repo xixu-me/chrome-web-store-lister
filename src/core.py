@@ -22,6 +22,7 @@ from urllib3.util.retry import Retry
 
 from src.config import (
     BASE_SITEMAP_URL,
+    DEFAULT_ITEM_WORKERS,
     DEFAULT_LOG_FORMAT,
     DEFAULT_LOG_LEVEL,
     GITHUB_ACTIONS_LOG_FORMAT,
@@ -174,6 +175,7 @@ class ChromeWebStoreLister:
         max_workers: int,
         retry_attempts: int,
         show_progress: bool = True,
+        item_workers: int = DEFAULT_ITEM_WORKERS,
     ) -> None:
         """
         Initialize the Chrome Web Store item data collection system.
@@ -185,6 +187,7 @@ class ChromeWebStoreLister:
             max_workers: Maximum number of concurrent worker threads.
             retry_attempts: Number of retry attempts for failed HTTP requests.
             show_progress: Whether to display progress bars during processing.
+            item_workers: Maximum number of concurrent item page requests.
         """
         # Store configuration parameters
         self.output_file = output_file
@@ -193,6 +196,7 @@ class ChromeWebStoreLister:
         self.max_workers = max_workers
         self.retry_attempts = retry_attempts
         self.show_progress = show_progress
+        self.item_workers = item_workers
 
         # Initialize performance monitoring system
         self.performance = PerformanceMonitor()
@@ -261,8 +265,12 @@ class ChromeWebStoreLister:
             allowed_methods=RETRY_ALLOWED_METHODS,
         )
 
-        # Apply retry strategy to HTTP and HTTPS adapters
-        adapter = HTTPAdapter(max_retries=retry_strategy)
+        # Apply retry strategy to HTTP and HTTPS adapters, sizing the connection
+        # pool so concurrent shard and item requests can reuse connections
+        adapter = HTTPAdapter(
+            max_retries=retry_strategy,
+            pool_maxsize=self.max_workers + self.item_workers,
+        )
         session.mount("http://", adapter)
         session.mount("https://", adapter)
 
@@ -322,6 +330,7 @@ class ChromeWebStoreLister:
     def _process_shard(
         self,
         shard_url: str,
+        item_executor: ThreadPoolExecutor,
         show_progress: bool = True,
         shard_index: int = 1,
         total_shards: int = 1,
@@ -331,6 +340,7 @@ class ChromeWebStoreLister:
 
         Args:
             shard_url: URL of the shard to process.
+            item_executor: Shared executor used to fetch item pages concurrently.
             show_progress: Whether to display progress bars during processing.
             shard_index: Current shard number (1-based).
             total_shards: Total number of shards being processed.
@@ -339,6 +349,7 @@ class ChromeWebStoreLister:
             dict[str, any]: Dictionary containing extracted items and statistics.
         """
         result = {
+            "failed": False,
             "items": [],
             "stats": {
                 "total_urls": 0,
@@ -351,6 +362,7 @@ class ChromeWebStoreLister:
         try:
             shard_root = self._fetch_sitemap(shard_url)
             if shard_root is None:
+                result["failed"] = True
                 return result
 
             # Get all URL elements for progress tracking
@@ -362,30 +374,43 @@ class ChromeWebStoreLister:
             url_progress = None
             if show_url_progress:
                 url_progress = tqdm(
-                    url_elements,
+                    total=len(url_elements),
                     desc=f"Processing URLs in shard {shard_index}/{total_shards}",
                     unit="url",
                     leave=False,
                     ncols=80,
                 )
-                url_iterator = url_progress
-            else:
-                url_iterator = url_elements
 
-            for url_elem in url_iterator:
+            item_futures = []
+            for url_elem in url_elements:
                 loc = url_elem.find(f"{SITEMAP_NAMESPACE}loc")
                 if loc is not None and loc.text:
                     result["stats"]["total_urls"] += 1
 
                     if is_valid_chrome_store_url(loc.text):
-                        item = extract_item_data(loc.text)
-                        if item:
-                            result["items"].append(item)
-                            result["stats"]["valid_items"] += 1
-                        else:
-                            result["stats"]["failed_extractions"] += 1
+                        # Fetch item pages concurrently instead of one by one
+                        item_futures.append(
+                            item_executor.submit(
+                                extract_item_data,
+                                loc.text,
+                                self.session,
+                                self.request_timeout,
+                            )
+                        )
                     else:
                         result["stats"]["invalid_urls"] += 1
+                        if url_progress is not None:
+                            url_progress.update(1)
+
+            for item_future in as_completed(item_futures):
+                item = item_future.result()
+                if item:
+                    result["items"].append(item)
+                    result["stats"]["valid_items"] += 1
+                else:
+                    result["stats"]["failed_extractions"] += 1
+                if url_progress is not None:
+                    url_progress.update(1)
 
             # Close progress bar if it was created
             if url_progress is not None:
@@ -437,12 +462,16 @@ class ChromeWebStoreLister:
                 "[{elapsed}<{remaining}, {rate_fmt}]",
             )
 
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+        with (
+            ThreadPoolExecutor(max_workers=self.item_workers) as item_executor,
+            ThreadPoolExecutor(max_workers=self.max_workers) as executor,
+        ):
             # Submit all shard processing tasks with shard index
             future_to_shard = {
                 executor.submit(
                     self._process_shard,
                     shard_url,
+                    item_executor,
                     self.show_progress,
                     i + 1,
                     len(shard_urls),
@@ -458,6 +487,9 @@ class ChromeWebStoreLister:
                     shard_result = future.result()
                     shard_items = shard_result["items"]
                     shard_stats = shard_result["stats"]
+
+                    if shard_result["failed"]:
+                        self.statistics["failed_shards"] += 1
 
                     # Accumulate items and statistics
                     all_items.extend(shard_items)
@@ -632,10 +664,11 @@ class ChromeWebStoreLister:
             items = self.fetch_all_items()
 
             if not items:
-                self.logger.warning("No items collected")
+                self.logger.error("No items collected")
                 if os.getenv("GITHUB_ACTIONS") == "true":
-                    print("::warning::No items were collected from Chrome Web Store")
-                return
+                    print("::error::No items were collected from Chrome Web Store")
+                self.performance.log_performance_summary(self.logger)
+                sys.exit(1)
 
             self.save_data(items)
 
